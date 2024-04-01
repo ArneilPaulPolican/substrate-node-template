@@ -22,13 +22,22 @@ use sp_std::prelude::*;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
+use pallet_contracts::DefaultContractAccessWeight;
+use pallet_contracts::Config;
+use pallet_contracts::weights::WeightInfo;
+use pallet_randomness_collective_flip::RandomnessCollectiveFlip;
+use pallet_contracts::Timestamp;
+use pallet_contracts::currency::Balance;
+use pallet_contracts::weights::DefaultContractAccessWeight;
+use pallet_contracts::chain_extension::Environment;
+
 
 // A few exports that help ease life for downstream crates.
 pub use frame_support::{
 	construct_runtime, parameter_types,
 	traits::{
 		ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem, Randomness,
-		StorageInfo,
+		StorageInfo, Nothing,
 	},
 	weights::{
 		constants::{
@@ -51,6 +60,8 @@ pub use pallet_template;
 
 /// An index to a block.
 pub type BlockNumber = u32;
+
+const CONTRACTS_DEBUG_OUTPUT: bool = true;
 
 /// Alias to 512-bit hash when used in the context of a transaction signature on the chain.
 pub type Signature = MultiSignature;
@@ -128,6 +139,13 @@ pub const MINUTES: BlockNumber = 60_000 / (MILLISECS_PER_BLOCK as BlockNumber);
 pub const HOURS: BlockNumber = MINUTES * 60;
 pub const DAYS: BlockNumber = HOURS * 24;
 
+pub const MILLICENTS: Balance = 1_000_000_000;
+pub const CENTS: Balance = 1_000 * MILLICENTS;
+
+const fn deposit(items: u32, bytes: u32) -> Balance {
+	items as Balance * 15 * CENTS + (bytes as Balance) * 6 * CENTS
+}
+const AVERAGE_ON_INITIALIZE_RATIO: Perbill = Perbill::from_percent(10);
 /// The version information used to identify this runtime when compiled natively.
 #[cfg(feature = "std")]
 pub fn native_version() -> NativeVersion {
@@ -202,6 +220,53 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
 }
 
+parameter_types!{
+	pub const DepositPerItem: Balance = deposit(1, 0);
+	pub const DepositPerByte: Balance = deposit(0, 1);
+	pub const DeletionQueueDepth: u32 = 128;
+	pub DeleionWeightLimit: Weight = AVERAGE_ON_INITIALIZE_RATIO * BlockWeights::get().max_block;
+	pub Schedule: pallet_contracts::Schedule<Runtime> = Default::default();
+}
+
+impl pallet_contracts::Config for Runtime{
+	type Time = Timestamp;
+	type Randomness = RandomnessCollectiveFlip;
+	type Currency = Balances;
+	// type Event  = Event ;
+	// type Call  = Call ;
+	type CallFilter = frame_support::traits::Nothing;
+	type WeightPrice = pallet_transaction_payment::Pallet<Self>;
+    type WeightInfo = RuntimeWeightInfo;
+	type ChainExtension = ();
+	type Schedule = Schedule;
+	type CallStack = [pallet_contracts::Frame<Self>; 31];
+	type DeletionQueueDepth = DeletionQueueDepth;
+	type DeletionWeightLimit = DeleionWeightLimit;
+	type DepositPerByte = DepositPerByte;
+	type DepositPerItem = DepositPerItem;
+	type AddressGenerator = pallet_contracts::DefaultAddressGenerator;
+	type ContractAccessWeight = DefaultContractAccessWeight<BlockWeights>;
+	type MaxCodeLen = ConstU32<{256 * 1024}>;
+	type RelaxedMaxCodeLen = ConstU32<{512 * 1024}>;
+	type MaxStorageKeyLen = ConstU32<{512 * 1024}>;
+	
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+	type DefaultDepositLimit = Self::DefaultDepositLimit;
+	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
+	type MaxDebugBufferLen = Self::MaxDebugBufferLen;
+	type MaxDelegateDependencies = MasDelegateDependencies;
+	type UploadOrigin = UploadOrigin;
+	type UnsafeUnstableInterface = Self::UnsafeUnstableInterface;
+	type InstantiateOrigin = InstantiateOrigin;
+	type RuntimeHoldReason = RuntimeHoldReason;
+	// type Migrations = Migrations;
+	type Debug = Debug;
+	type Environment = Environment;
+	type ApiVersion = Version;
+	type Xcm = Xcm; 
+}
+
 impl pallet_aura::Config for Runtime {
 	type AuthorityId = AuraId;
 	type DisabledValidators = ();
@@ -249,6 +314,18 @@ impl pallet_balances::Config for Runtime {
 	type MaxHolds = ();
 }
 
+// Newly added pallet for Nicks
+impl pallet_nicks::Config for Runtime {
+	type Currency = Balances;
+	type ReservationFee = ConstU128<100>;
+	type Slashed = ();
+	type ForceOrigin = frame_system::EnsureRoot<AccountId>;
+	type MinLength = ConstU32<8>;
+	type MaxLength = ConstU32<32>;
+	// type Event = Event;
+	type RuntimeEvent = RuntimeEvent;
+}
+
 parameter_types! {
 	pub FeeMultiplier: Multiplier = Multiplier::one();
 }
@@ -282,6 +359,8 @@ construct_runtime!(
 		Aura: pallet_aura,
 		Grandpa: pallet_grandpa,
 		Balances: pallet_balances,
+		Nicks: pallet_nicks,
+		Contracts: pallet_contracts,
 		TransactionPayment: pallet_transaction_payment,
 		Sudo: pallet_sudo,
 		// Include the custom logic from the pallet-template in the runtime.
@@ -338,6 +417,9 @@ mod benches {
 }
 
 impl_runtime_apis! {
+
+	
+
 	impl sp_api::Core<Block> for Runtime {
 		fn version() -> RuntimeVersion {
 			VERSION
